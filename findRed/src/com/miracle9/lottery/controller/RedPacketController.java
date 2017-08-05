@@ -1,0 +1,631 @@
+package com.miracle9.lottery.controller;
+
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.apache.commons.lang.StringUtils;
+import org.apache.log4j.Logger;
+import org.dom4j.Document;
+import org.dom4j.Element;
+import org.dom4j.io.SAXReader;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.google.gson.Gson;
+import com.miracle9.lottery.DbThreads;
+import com.miracle9.lottery.GameConfig;
+import com.miracle9.lottery.GameController;
+import com.miracle9.lottery.bean.RedPacketResult;
+import com.miracle9.lottery.bean.Result;
+import com.miracle9.lottery.bean.TimeValue;
+import com.miracle9.lottery.entity.AuthorizeLog;
+import com.miracle9.lottery.entity.AwardConfig;
+import com.miracle9.lottery.entity.ClickLog;
+import com.miracle9.lottery.entity.HelpLog;
+import com.miracle9.lottery.entity.RedPacketLog;
+import com.miracle9.lottery.entity.StatisticsLog;
+import com.miracle9.lottery.entity.UserInfo;
+import com.miracle9.lottery.service.AuthorizeLogService;
+import com.miracle9.lottery.service.AwardConfigService;
+import com.miracle9.lottery.service.ClickLogService;
+import com.miracle9.lottery.service.HelpLogService;
+import com.miracle9.lottery.service.RedPacketLogService;
+import com.miracle9.lottery.service.StaticsLogService;
+import com.miracle9.lottery.utils.HttpUtil;
+import com.miracle9.lottery.utils.LogManager;
+import com.miracle9.lottery.utils.MyUtil;
+
+import net.sf.json.JSONObject;
+
+
+@RequestMapping("/findRed")
+public class RedPacketController {
+	private Gson gson = new Gson();
+//	private String tokenUrl = "https://api.weixin.qq.com/cgi-bin/token";
+//	private String ticketUrl = "https://api.weixin.qq.com/cgi-bin/ticket/getticket";
+//	private String redpacketUrl = "https://api.mch.weixin.qq.com/mmpaymkttransfers/sendredpack";
+	private String publickey="wxcd2c61ec90a2529c";
+	private String privatekey="227eea445f25303b7d1265866f68dca7";
+	private String APPID="wxcd2c61ec90a2529c";
+	@Autowired
+	private RedPacketLogService redPacketLogService;
+	@Autowired
+	private StaticsLogService staticsLogService;
+	@Autowired
+	private GameConfig gameConfig;
+	@Autowired
+	private AuthorizeLogService authorizeLogService;
+	@Autowired
+	private GameController gameController;
+	@Autowired
+	private HelpLogService helpLogService;
+	@Autowired
+	private ClickLogService clickLogService;
+	
+	private static final Logger logger = Logger
+			.getLogger(RedPacketController.class);
+	private Map<String, Map<String, String>> DRLMap;
+	public void init(){
+		DRLMap=new HashMap<String, Map<String,String>>();
+		Map<String, String> DRL = new HashMap<>();
+		DRL.put("10211", "天津柳林");
+		DRL.put("10212", "天津东联");
+		DRL.put("10214", "天津中乒");
+		DRL.put("10215", "天津华苑");
+		DRL.put("10217", "天津浩物");
+		DRL.put("10218", "天津和裕");
+		DRL.put("10219", "天津柳林金海");
+		DRL.put("1021A", "天津奥嘉");
+		DRL.put("1021B", "天津奥德行津盛");
+		DRL.put("1021C", "天津庞大丰雅");
+		DRLMap.put("022 ", DRL);
+		DRL = new HashMap<>();
+		DRL.put("41812","深圳大兴");
+		DRL.put("41813","深圳华日");
+		DRL.put("41814","深圳深业");
+		DRL.put("41815","深圳都通");
+		DRL.put("41817","深圳红彤");
+		DRL.put("41818","深圳骏爵");
+		DRL.put("41819","深圳易达");
+		DRL.put("4181A","深圳中升");
+		DRL.put("4181B","深圳宝安大兴");
+		DRL.put("4181C","深圳中升迎宾");
+		DRL.put("4181D","深圳深业隆华");
+		DRL.put("4181E","深圳大兴观澜");
+		DRL.put("4181F","深圳兴业");
+		DRL.put("4181G","深圳光明");
+		DRLMap.put("0755", DRL);
+		DRL = new HashMap<>();
+		DRL.put("52222","重庆龙华人和");
+		DRL.put("52223","重庆百事达");
+		DRL.put("52225","重庆中汽西南华通");
+		DRL.put("52224","重庆万家");
+		DRL.put("52221","重庆渝都");
+		DRL.put("52226","重庆百事达华丰");
+		DRL.put("52228","重庆两江");
+		DRLMap.put("023", DRL);
+		DRL = new HashMap<>();
+		DRL.put("20611","长春东环");
+		DRL.put("20612","长春华阳");
+		DRL.put("20613","长春金山");
+		DRL.put("20614","长春一汽服贸");
+		DRLMap.put("0431", DRL);
+	}
+	public enum RedPacketType {
+		FIRST_GET(0), AGAIN_GET(1), FIRST_NOT(2), AGAIN_NOT(3), AWARD_OVER(4), ACTIVITY_OVER(5), NOT_TIME(6);
+		public int value;
+
+		RedPacketType(int value) {
+			this.value = value;
+		}
+	}
+
+	/**
+	 * 全局缓存
+	 */
+	public static Map<String, TimeValue> cache = new ConcurrentHashMap<>();
+	
+	@ResponseBody
+	@RequestMapping(value = "/test", produces = "text/html;charset=UTF-8")
+	public String test() {
+		return "test";
+	}
+	
+	
+	@ResponseBody
+	@RequestMapping(value = "/userinfo", produces = "text/html;charset=UTF-8")
+	public String userinfo(String name,String tel,String city) {
+		if (name!=null&&tel!=null&&city!=null&&!name.isEmpty()&&!tel.isEmpty()&&!city.isEmpty()) {
+			final UserInfo userInfo=new UserInfo();
+			userInfo.setName(name);
+			userInfo.setTel(tel);
+			userInfo.setCity(city);
+			userInfo.setUpdateDate(new Date());
+			DbThreads.executor(new Runnable() {
+				@Override
+				public void run() {
+					authorizeLogService.addUserInfo(userInfo);
+				}
+			});
+			return "0";
+		}else {
+			return "资料不完全";
+		}
+	}
+	
+	// 抽奖
+	@ResponseBody
+	@RequestMapping(value = "/getResult", produces = "text/html;charset=UTF-8")
+	public String getResult(final String openId,String code,String city) {
+		logger.info(openId+","+code);
+		
+		
+//		if(code==null ||!LotteryCodeService.codes.contains(code)){
+//			logger.info("无此code");
+//			return "-1";
+//		}
+			
+		// openId授权验证
+//		if (openId == null || !AuthorizeLogService.openidCacheMap.containsKey(openId)) {
+//			logger.info("无此openId");
+//			return "-1";
+//		}
+		
+		try{
+			final ClickLog click = new ClickLog();
+			click.setClickDate(new Date());
+			click.setOpenId(openId);
+			click.setCity(city);
+			DbThreads.executor(new Runnable() {
+				@Override
+				public void run() {
+					clickLogService.add(click);
+				}
+			});
+			
+
+			
+			
+			if (!isCanDraw()) {// 活动结束
+				Result result = new Result(0,"活动已结束");
+				return gson.toJson(result);
+			}
+			if (!inTime()) {// 活动结束
+				Result result = new Result(0,"游戏时间未到，请稍后再试");
+				return gson.toJson(result);
+			}
+			//TODO游戏细则
+			
+			
+			final AuthorizeLog log = AuthorizeLogService.openidCacheMap.get(openId+city);
+			
+			if (log.getCanDrawNum() <= 0) {
+				RedPacketResult result = new RedPacketResult(0, -1, "机会用完");
+				return gson.toJson(result);
+			}
+			log.setCanDrawNum(log.getCanDrawNum() - 1);
+			DbThreads.executor(new Runnable() {
+
+				@Override
+				public void run() {
+					authorizeLogService.update(log);
+				}
+			});
+			int i=redPacketLogService.getCount(openId);
+			int money=0;
+			logger.info("中奖数》》》"+i);
+			if(i==0){
+				//抽奖规则
+				money = gameController.draw(code);// 抽奖
+//			    int k = 0;
+//			    while(money==0){
+//				money = gameController.draw(code);// 抽奖
+//				if(k==10){
+//					break; 
+//				}
+//				k++;
+//			 }
+			}
+
+			//TODO抽奖规则
+				logger.info(money);
+			if (money == 0) {
+				
+				RedPacketResult result = new RedPacketResult(0, 1, "");
+				return gson.toJson(result);
+			} else {
+				
+				RedPacketResult result = new RedPacketResult(money, 1, "");
+				//TODO发现金公报
+				RedPacketLog redlog;
+				redlog=new RedPacketLog();
+				redlog.setMoney(money);
+				redlog.setOpenId(openId);
+				redlog.setSend(false);
+				redlog.setAwardDate(new Date());
+				redlog.setCity(city);
+				final  RedPacketLog redfinal=redlog;
+				DbThreads.executor(new Runnable() {
+
+					@Override
+					public void run() {
+						redPacketLogService.add(redfinal);
+						logger.info(redfinal.getAwardDate()+";"+redfinal.getMoney()+"");
+					}
+				});
+//				
+				return gson.toJson(result);
+		}
+		
+		}catch(Exception e){
+			logger.info("----"+e.fillInStackTrace());
+			return "0";
+		}
+	}
+
+	private boolean inTime() {
+		boolean flagee=false;
+		logger.info("size:"+AwardConfigService.config.size());
+		for(AwardConfig ac:AwardConfigService.config){
+			try {Date acTime;
+			Long now=System.currentTimeMillis();
+			
+				acTime = GameController.timetran.parse(GameController.daytran.format(new Date())+ac.getStartTime());
+				logger.info("now:"+now+";acTime:"+acTime+";intever:");
+				if(acTime.getTime()<now
+					&&  now -acTime.getTime()<ac.getHourNum()*60*1000){
+					flagee=true;
+					logger.info(GameController.timetran.format(acTime));
+					break;
+				}
+			
+				} catch (ParseException e) {
+				e.printStackTrace();
+			}
+		}
+		return flagee;
+	}
+
+	
+
+	@SuppressWarnings("unchecked")
+	public Map<String, String> parseXml(String msg) throws Exception {
+		// 将解析结果存储在HashMap中
+		Map<String, String> map = new HashMap<String, String>();
+
+		// 从request中取得输入流
+		InputStream inputStream = new ByteArrayInputStream(msg.getBytes("UTF-8"));
+
+		// 读取输入流
+		SAXReader reader = new SAXReader();
+		Document document = reader.read(inputStream);
+		// 得到xml根元素
+		Element root = document.getRootElement();
+		// 得到根元素的所有子节点
+		List<Element> elementList = root.elements();
+
+		// 遍历所有子节点
+		for (Element e : elementList)
+			map.put(e.getName(), e.getText());
+
+		// 释放资源
+		inputStream.close();
+		inputStream = null;
+
+		return map;
+	}
+
+	
+
+	private boolean isCanDraw() {
+		return MyUtil.isBetween(gameConfig.begin, gameConfig.end);
+	}
+
+	// 获取签名
+	@ResponseBody
+	@RequestMapping("/getSign")
+	public String getSign(String url,String openId,String city) {
+		System.out.println(openId+","+url);
+		if(url==null ||openId==null){
+			return "-1";
+		}
+		
+		final AuthorizeLog log = AuthorizeLogService.openidCacheMap.get(openId+city);
+		if (log == null) 
+			return "-1";
+		
+		try{
+			//String getTokenUrl = "http://wx.ftms.com.cn/index.php/Wechat/JsSdk/index.html";
+			String getTokenUrl = "http://ftms-wechat.bjscfl.com/index.php?g=Interface&m=TempJssdk&a=signPackage";
+			Long timestamp=new Date().getTime();
+			
+			String PostData1="{\"url\":\""+URLEncoder.encode(url,"UTF-8")+"\"}";
+			String PostData="request={\"body\":"+PostData1+","
+					+ "\"head\":{\"public_key\":\"ftms_js_sdk_validate\","
+							+ "\"secret_key\":\""+this.Md5Encode("ftms_js_sdk_validate"+"yqft_wx@$$%YZW"+timestamp).toLowerCase()+"\","
+									+ "\"timestamp\":\""+timestamp+"\"}}";
+			String result=HttpUtil.sendPost(getTokenUrl,PostData);
+			JSONObject jo = JSONObject.fromObject(result);
+			logger.info("json==="+jo);
+			return jo.getString("content");
+		}catch(Exception e){
+			return "0";
+		}
+		
+	}
+
+
+	
+
+	// 获取授权接口地址
+	@ResponseBody
+	@RequestMapping("/getAuthorizeUrl")
+	public String getAuthorizeUrl(String url) {
+		System.out.println(","+url);
+		if(url==null){
+			return "-1";
+		}
+		try {
+			// snsapi_base 
+			// scope=snsapi_userinfo 弹出授权页面
+			String getCodeUrl = "http://wx.ftms.com.cn/index.php/Wechat/Oauth/authorize"
+					+"?"+"appid="+this.APPID+"&redirect_uri="
+					+URLEncoder.encode(url,"UTF-8")
+					+"&scope=snsapi_base";
+			
+			return getCodeUrl;
+		} catch (UnsupportedEncodingException e) {
+			LogManager.error(e);
+			return "0";
+		}
+	}
+	private   String Md5Encode(String str) throws NoSuchAlgorithmException {
+		StringBuilder sign = new StringBuilder();
+
+		MessageDigest md = MessageDigest.getInstance("MD5");
+		byte[] bytes = md.digest(str.getBytes());
+
+		for (int i = 0; i < bytes.length; i++) {
+		String hex = Integer.toHexString(bytes[i] & 0xFF);
+		if (hex.length() == 1) {
+		sign.append("0");
+		}
+		sign.append(hex.toUpperCase());
+		}
+		return sign.toString();
+		}
+	
+	//获取用户信息
+		@ResponseBody
+		@RequestMapping("/authorizeCallback")
+		public String authorizeCallback(String code,String city) throws NoSuchAlgorithmException, UnsupportedEncodingException {
+			logger.info(code);
+			if(code==null){
+				return "-1";
+			}
+			try{
+				String getTokenUrl = "http://wx.ftms.com.cn/index.php/Wechat/Oauth/getUserInfoByCode";
+				Long timestamp=new Date().getTime();
+				String PostData="code="+code
+						+"&visitor=1"
+						+"&archiveid=ftms_ksd";
+				String PostData1="{\"code\":\""+code+"\",\"visitor\":\"1\",\"archiveid\":\"ftms_ksd\"}";
+				String param="publickey="+this.publickey+
+						"&timestamp="+timestamp+
+						"&token="+this.Md5Encode(PostData1+"&"+timestamp+"&"+privatekey).toLowerCase();
+				String tokenJson=HttpUtil.sendPost(getTokenUrl+"?"+param,PostData);
+				System.out.println(tokenJson);
+				AuthorizeLog log =null;
+				if(tokenJson.contains("errcode"))
+					return "-1";
+				
+					JSONObject jo = JSONObject.fromObject(tokenJson);
+					String openid = jo.optString("openid");
+					if (StringUtils.isNotBlank(openid) && !AuthorizeLogService.openidCacheMap.containsKey(openid+city)) {
+						log= new AuthorizeLog(openid, new Date());
+						log.setCity(city);
+						final AuthorizeLog author=log;
+						DbThreads.executor(new Runnable() {
+							@Override
+							public void run() {
+								authorizeLogService.add(author);
+							}
+						});
+						AuthorizeLogService.openidCacheMap.put(openid+city, log);
+					}else{
+						log=AuthorizeLogService.openidCacheMap.get(openid+city);
+					}
+					if(log.getName()==null){
+						logger.info("0"+tokenJson);
+						return "0"+tokenJson;
+					}
+				logger.info("1"+tokenJson);
+				return "0"+tokenJson;
+			}
+			catch(Exception e){
+				return e.getMessage();
+			}
+			
+		}
+
+	// 授权回调
+//	@ResponseBody
+//	@RequestMapping("/authorizeCallback")
+//	public String authorizeCallback1(String code) {
+//		String getTokenUrl = "https://api.weixin.qq.com/sns/oauth2/access_token";
+//		String param = "appid=" + gameConfig.getAppId() + "&" + "secret=" + gameConfig.getAppSecret() + "&code=" + code
+//				+ "&grant_type=authorization_code";
+//		String tokenJson = HttpUtil.sendPost(getTokenUrl, param);
+//		if (tokenJson != "") {
+//			JSONObject jo = JSONObject.fromObject(tokenJson);
+//			String openid = jo.optString("openid");
+//			if (StringUtils.isNotBlank(openid) && !AuthorizeLogService.openidCacheMap.containsKey(openid)) {
+//				AuthorizeLog log = new AuthorizeLog(openid, new Date());
+//				authorizeLogService.add(log);
+//				AuthorizeLogService.openidCacheMap.put(openid, log);
+//			}
+//		}
+//		return tokenJson;
+//	}
+
+	// 获取抽奖和分享信息
+	@ResponseBody
+	@RequestMapping(value = "/updateMessage", produces = "text/html;charset=UTF-8")
+	public String updateMessage(String openId,String tel,String name,String shop,String city) {
+		logger.info(openId+","+tel+","+name+","+shop);
+		if(openId==null || tel==null || name==null || shop==null)
+			return "-1";
+		this.restoreInfo(openId, tel,shop, DRLMap.get(city).get(shop), "摇一摇抢红包", name, city);
+		final AuthorizeLog log = AuthorizeLogService.openidCacheMap.get(openId+city);
+		if (log == null) 
+			return "-1";
+		
+		try{
+			
+			log.setTel(tel);
+			log.setName(name);
+			log.setShop(shop);
+			log.setCity(city);
+			
+			
+			DbThreads.executor(new Runnable() {
+
+				@Override
+				public void run() {
+					authorizeLogService.update(log);
+				}
+			});
+			return "1";
+		}catch(Exception e){
+			return "0";
+		}
+		
+	}
+	// 获取抽奖和分享信息
+		@ResponseBody
+		@RequestMapping(value = "/getShop", produces = "text/html;charset=UTF-8")
+		public String getShop(String openId,String city) {
+			logger.info(openId+",");
+			if(AuthorizeLogService.openidCacheMap.get(openId+city)==null)
+				return "-1";
+			String keys="[";
+			for (String key:DRLMap.get(city).keySet()){
+				if(keys.equals("["))
+					keys+="\""+key+"\"";
+				else
+					keys+=",\""+key+"\"";
+			}
+			keys+="]";
+			String values="[";
+			for(String key:DRLMap.get(city).keySet()){
+				if(values.equals("["))
+					values+="\""+DRLMap.get(city).get(key)+"\"";
+				else
+					values+=",\""+DRLMap.get(city).get(key)+"\"";
+			}
+			values+="]";
+			
+			return "{\"code\":"+keys+",\"name\":"+values+"}";
+		}
+		public String restoreInfo(String openId,String phone,String DLRcode,String DLRname,String archiveId,String name,String city){
+			logger.info(openId+","+phone+","+name+","+DLRcode);
+			String getTokenUrl = "http://ftms-wechat-t.bjscfl.com/index.php?g=Interface&m=Usershare&a=addMsg";
+			//String getTokenUrl = "http://ftms-wechat.bjscfl.com/index.php?g=Interface&m=TempJssdk&a=signPackage";
+			String PostData1="DLRcode="+DLRcode
+					+ "&DLRname="+DLRname
+					+ "&openid="+openId
+					+ "&name="+name
+					+ "&tel="+phone
+					+ "&archiveId="+archiveId;
+			String result=HttpUtil.sendPost(getTokenUrl,PostData1);
+			System.out.println("result:"+result);
+			return result;
+		}
+	// 获取抽奖和分享信息
+	@ResponseBody
+	@RequestMapping(value = "/share", produces = "text/html;charset=UTF-8")
+	public String share(String openId,String city) {
+		logger.info(openId);
+	
+		if(openId==null)
+			return "-1";
+		//TODO统计转发次数
+		final AuthorizeLog log = AuthorizeLogService.openidCacheMap.get(openId+city);
+		if(log==null)
+			return "-1";
+		log.setShare(true);
+		log.setUpdateDate(new Date());
+		DbThreads.executor(new Runnable() {
+
+			@Override
+			public void run() {
+				authorizeLogService.update(log);
+			}
+		});		
+		final StatisticsLog l = new StatisticsLog();
+		l.setClickDate(new Date());
+		l.setOpenId(openId);
+		l.setCity(city);
+		DbThreads.executor(new Runnable() {
+			@Override
+			public void run() {				
+				staticsLogService.add(l);
+			}
+		});
+
+		return "1";
+	}
+	// 助力
+		@ResponseBody
+		@RequestMapping(value = "/help", produces = "text/html;charset=UTF-8")
+		public String help(String userOpenId,String friendOpenId,String city) {
+			logger.info(userOpenId+","+friendOpenId+",");
+			if(userOpenId==null || friendOpenId==null)
+				return "-1";
+			//TODO统计转发次数
+			AuthorizeLog log = AuthorizeLogService.openidCacheMap.get(userOpenId+city);
+			if (log == null) {
+				return "-1";
+			}
+			log = AuthorizeLogService.openidCacheMap.get(friendOpenId+city);
+			if (log == null) {
+				Result result = new Result(-1, "找不到好友");
+				return gson.toJson(result);
+			}
+			HelpLog help=new HelpLog();
+			help.setFiendOpenId(friendOpenId);
+			help.setUserOpenId(userOpenId);
+			try{
+				synchronized (log) {
+					if (log.getCanDrawNum()>0) {
+						Result result = new Result(1, "您的好友已被助力，请稍后再试");
+						return gson.toJson(result);
+					}
+					helpLogService.add(help);
+					log.setCanDrawNum(log.getCanDrawNum() + 1);
+					log.setUpdateDate(new Date());
+					authorizeLogService.update(log);
+					Result result = new Result(1, "助力成功，您的好友成功获得1次额外抽取红包的机会。");
+					return gson.toJson(result);
+				}
+			}catch(Exception e){
+				Result result = new Result(1, "您已经助力过该好友。");
+				return gson.toJson(result);
+			}
+			
+		}
+		
+
+}
